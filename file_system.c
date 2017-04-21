@@ -3,6 +3,8 @@
 #include <dirent.h>
 #include <string.h>
 
+#define NUMBER_OF_BLOCKS 64
+
 int search_filesystems(){
 	DIR *dir;
 	struct dirent *ent;
@@ -42,7 +44,23 @@ int check_fs_validaity(char * fs_name){
 	return exists;
 }
 
-void create_filesystem(){
+int get_fsid(){
+	DIR *dir;
+	struct dirent *ent;
+	int const_length = strlen("filesystem");
+	int count = 0;
+	if ((dir = opendir (".")) != NULL) {
+		while ((ent = readdir (dir)) != NULL) {
+			if(strncmp(ent->d_name, "filesystem", const_length) == 0) {
+				count++;
+			}
+		}
+		closedir (dir);
+	}
+	return count + 1;	
+}
+
+int create_sfs(){
 	// 4 lines per block, each line 1 KB ==> each block 4 KB
 	// each line has 4 comma seperated values
 	// each value 256 Bytes
@@ -54,6 +72,8 @@ void create_filesystem(){
 	scanf("%s", name);
 	char fs_name[100] = "filesystem_";
 	strcat(fs_name, name);
+
+	int fsid = get_fsid();
 
 	if (check_fs_validaity(fs_name))
 		printf("Filesystem with name : %s already exists!\n", name);
@@ -70,13 +90,48 @@ void create_filesystem(){
 
 		fp = fopen(fs_name, "w");
 
-		fprintf(fp,"%s", fs_name);
+		fprintf(fp,"%d", fsid);
+		fprintf(fp,",%s", fs_name);
 		fprintf(fp,",%d", num_inodes);
-		
-		printf("Filesystem %s , with %d blocks for inodes, that is, a capacity for %d files, successfully created!\n", name, num_inodes, 16 * num_inodes);
+		fprintf(fp, "\n\n\n\n");
+		int i;
+
+		for(i=1 ; i < (NUMBER_OF_BLOCKS - 1) * 4 ; i++){
+			fprintf(fp, "\n");
+		}
+
+		printf("Filesystem %s , with %d blocks for inodes, that is, a capacity for %d files, successfully created!\nFile System ID : %d\n", name, num_inodes, 16 * num_inodes, fsid);
 
 		fclose(fp);
 	}
+}
+
+int read_data(int disk, int blocknum, void * block){
+
+}
+
+int write_data(int disk, char blocknum, void * block){
+
+}
+
+int write_file(int disk, char* filename, void* block){
+
+}
+
+int read_file(int disk, char* filename, void* block){
+
+}
+
+void print_inodebitmaps(int fsid){
+
+}
+
+void print_databitmaps(int fsid){
+
+}
+
+void print_filelist(int fsid){
+
 }
 
 int main(){
@@ -103,7 +158,7 @@ int main(){
 		char command[256];
 		scanf("%s",command);
 		if(strcmp(command, "create_filesystem") == 0 ){
-			create_filesystem();
+			create_sfs();
 		}
 		if(strncmp(command, "mount", 5) == 0){
 			if(mounted){
