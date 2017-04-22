@@ -154,8 +154,6 @@ int write_data(int disk, int blocknum, void * block){
 
 int write_file(int disk, char* filename, void* block){
 	//read filesystem name
-	DIR *dir;
-	struct dirent *ent;
 	char fs_filename[50]="filesystem_";
 	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
 	//read inode bitmap
@@ -208,7 +206,48 @@ int write_file(int disk, char* filename, void* block){
 }
 
 int read_file(int disk, char* filename, void* block){
-
+	FILE * fp;
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char lines_of_file[100][100];
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	fp = fopen(fs_filename, "r");
+	int count=0;
+	while ((read = getline(&line, &len, fp)) != -1){
+		strcpy(lines_of_file[count], line);
+		count++;
+	}
+	fclose(fp);
+	for(i=3 ; i < 3 + mounted_fs_info.num_inode_blocks * 16 ; i++){
+		if (strcmp(lines_of_file[i],"\n")==0)
+			continue;
+		lines_of_file[i][strlen(lines_of_file[i]) - 1] = '\0';
+		const char s[2] = ",";
+		char * token;
+		token = strtok(lines_of_file[i], s);
+		if(strcmp(token, filename)==0){
+			token = strtok(NULL, s);
+			while(token != NULL){
+				int blocknum = atoi(token);
+				blocknum = 3 + mounted_fs_info.num_inode_blocks*16 + blocknum;
+				char * token_2;
+				const char delim[2] = ";";
+				// char final_str[4096]="";
+				lines_of_file[blocknum - 1][strlen(lines_of_file[blocknum - 1]) - 1]='\0';
+				token = strtok(lines_of_file[blocknum - 1], delim);
+				while(token != NULL){
+					printf("%s\n", token);
+					token=strtok(NULL,delim);
+				}
+				// printf("%s", lines_of_file[blocknum - 1]);
+				token = strtok(NULL, s);  
+			}
+			return 1;
+		}
+	}
+	printf("File does not exist!\n");
 }
 
 void print_inodebitmaps(int fsid){
@@ -340,7 +379,7 @@ int main(){
 			if(mounted){
 				//implement write
 				char file_name[20];
-				char block_data[2048]="";
+				char block_data[4096]="";
 				printf("Enter filename : ");
 				scanf("%s", file_name);
 				printf("Number of lines in the file : ");
@@ -366,7 +405,10 @@ int main(){
 		}
 		if (strcmp(command,"read_file") == 0){
 			if(mounted){
-				//implement read
+				char name[50];
+				printf("Enter filename: ");
+				scanf("%s",name);
+				read_file(mounted_fs_info.fsid, name, NULL);
 			}
 			else{
 				printf("Mount a filesystem first!\n");
