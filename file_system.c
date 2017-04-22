@@ -3,7 +3,14 @@
 #include <dirent.h>
 #include <string.h>
 
-#define NUMBER_OF_BLOCKS 64
+struct info{
+	char fs_mounted_name[256];
+	int fsid;
+	int num_inode_blocks;
+	int num_data_blocks;
+} mounted_fs_info;
+
+int i;
 
 int search_filesystems(){
 	DIR *dir;
@@ -14,7 +21,6 @@ int search_filesystems(){
 	while ((ent = readdir (dir)) != NULL) {
 		if(strncmp(ent->d_name, "filesystem", const_length) == 0) {
 			printf("  %d.) %s", count+1, ent->d_name + const_length + 1 );
-			// fwrite(ent->d_name, const_length + 1, strlen(ent -> d_name) - 1, stdout);
 			count++;
 		}
 	}
@@ -60,49 +66,58 @@ int get_fsid(){
 	return count + 1;	
 }
 
-int create_sfs(){
-	// 4 lines per block, each line 1 KB ==> each block 4 KB
-	// each line has 4 comma seperated values
+int create_sfs(char * name, int nbytes){
+	// 1 line per block, each line 4 KB ==> each block 4 KB
+	// Line may or may not have comma seperated values
 	// each value 256 Bytes
-	// first block(first 4 lines) : super block
+	// first block(first line) : super block
 	// second block : inode bitmap
 	// third block : data bitmap
-	printf("Enter name of filesystem\n");
-	char name[20];
-	scanf("%s", name);
 	char fs_name[100] = "filesystem_";
 	strcat(fs_name, name);
 
 	int fsid = get_fsid();
 
-	if (check_fs_validaity(fs_name))
+	if (check_fs_validaity(fs_name)){
 		printf("Filesystem with name : %s already exists!\n", name);
+		return -1;
+	}
 	else{
 		
-		printf("Number of blocks(each 4KB in size) for Inodes\n");
-		int num_inodes;
-		scanf("%d", &num_inodes);
+		printf("Enter number of bytes for data\n");
+		int num_bytes;
+		scanf("%d", &num_bytes);
 
 		FILE * fp;
 		char * line = NULL;
 		size_t len = 0;
 		ssize_t read;
+		int data_blocks = (num_bytes/1024)%4 == 0 ? (num_bytes/1024)/4 : ((num_bytes/1024)/4) + 1;
+		int num_inodes = (data_blocks)%16 == 0 ? (data_blocks)/16 : (data_blocks/16) + 1;
+		
+
+		char inode_bitmap[num_inodes+1], data_bitmap[data_blocks+1];
+
+		for(i = 0 ; i < num_inodes*16 ; i++){
+			inode_bitmap[i]='0';
+		}
+		inode_bitmap[i]='\0';
+		for(i = 0 ; i < data_blocks ; i++){
+			data_bitmap[i]='0';
+		}
+		data_bitmap[i]='\0';
 
 		fp = fopen(fs_name, "w");
-
-		fprintf(fp,"%d", fsid);
-		fprintf(fp,",%s", fs_name);
-		fprintf(fp,",%d", num_inodes);
-		fprintf(fp, "\n\n\n\n");
-		int i;
-
-		for(i=1 ; i < (NUMBER_OF_BLOCKS - 1) * 4 ; i++){
+		fprintf(fp,"%d,%s,%d,%d\n%s\n%s", fsid, name, num_inodes, data_blocks, inode_bitmap, data_bitmap);
+		int i, NUMBER_OF_LINES = num_inodes*16 + data_blocks;
+		for(i=1 ; i <= (NUMBER_OF_LINES) ; i++){
 			fprintf(fp, "\n");
 		}
 
-		printf("Filesystem %s , with %d blocks for inodes, that is, a capacity for %d files, successfully created!\nFile System ID : %d\n", name, num_inodes, 16 * num_inodes, fsid);
+		printf("Filesystem %s with %d data block(s), with %d block(s) for inodes, that is, a capacity for %d file(s), successfully created!\nFile System ID : %d\n", name, data_blocks, num_inodes, 16 * num_inodes, fsid);
 
 		fclose(fp);
+		return fsid;
 	}
 }
 
@@ -110,12 +125,86 @@ int read_data(int disk, int blocknum, void * block){
 
 }
 
-int write_data(int disk, char blocknum, void * block){
-
+int write_data(int disk, int blocknum, void * block){
+	//write to disk block
+	//update inode and data bitmaps
+	FILE * fp;
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char lines_of_file[100][100];
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	fp = fopen(fs_filename, "r");
+	int count=0;
+	while ((read = getline(&line, &len, fp)) != -1){
+		strcpy(lines_of_file[count], line);
+		count++;
+	}
+	fclose(fp);
+	lines_of_file[1][blocknum - 1]='1';
+	lines_of_file[2][disk - 1]='1';
+	fp = fopen(fs_filename, "w");
+	for(i=0;i<count;i++){
+		fprintf(fp, "%s", lines_of_file[i]);
+	}
+	fclose(fp);
+	return 1;
 }
 
 int write_file(int disk, char* filename, void* block){
+	//read filesystem name
+	DIR *dir;
+	struct dirent *ent;
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	//read inode bitmap
+	FILE * fp;
+	fp = fopen(fs_filename, "r");
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	line[strlen(line)-1] = '\0';
+	for(i=0;i<strlen(line);i++){
+		if(line[i]=='0')
+			break;
+	}
+	int line_number = 3 + i + 1;
 
+	getline(&line, &len, fp);
+	line[strlen(line)-1] = '\0';
+	for(i=0;i<strlen(line);i++){
+		if(line[i]=='0')
+			break;
+	}
+	int block_number = i + 1;
+	int blocknum = 3 + mounted_fs_info.num_inode_blocks*16 + block_number;
+	fclose(fp);
+	//make inode entry
+	char lines_of_file[100][100];
+	fp = fopen(fs_filename, "r");
+	int count=0;
+	while ((read = getline(&line, &len, fp)) != -1){
+		strcpy(lines_of_file[count], line);
+		count++;
+	}
+	fclose(fp);
+	char temp_str[50];
+	sprintf(temp_str ,"%s,%d\n", filename, block_number);
+	strcpy(lines_of_file[line_number - 1], temp_str);
+	char temp_str_2[50];
+	sprintf(temp_str_2 ,"%s\n", (char *) block);
+	strcpy(lines_of_file[blocknum - 1], temp_str_2);
+	
+	fp = fopen(fs_filename, "w");
+	for(i=0;i<count;i++){
+		fprintf(fp, "%s", lines_of_file[i]);
+	}
+	fclose(fp);
+	//commit the write
+	return write_data(block_number, line_number - 3, block);
 }
 
 int read_file(int disk, char* filename, void* block){
@@ -123,20 +212,69 @@ int read_file(int disk, char* filename, void* block){
 }
 
 void print_inodebitmaps(int fsid){
-
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	//read inode bitmap
+	FILE * fp;
+	fp = fopen(fs_filename, "r");
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	for(i=0 ; i<strlen(line)-1 ; i++){
+		if(line[i]=='1')
+			printf("Inode number %d : Occupied\n", i);
+		else
+			printf("Inode number %d : Free\n", i);
+	}
 }
 
 void print_databitmaps(int fsid){
-
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	//read inode bitmap
+	FILE * fp;
+	fp = fopen(fs_filename, "r");
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	for(i=0 ; i<strlen(line)-1 ; i++){
+		if(line[i]=='1')
+			printf("Data block number %d : Occupied\n", i);
+		else
+			printf("Data block number %d : Free\n", i);
+	}
 }
 
 void print_filelist(int fsid){
-
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	//read inode bitmap
+	FILE * fp;
+	fp = fopen(fs_filename, "r");
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	for(i=0 ; i < mounted_fs_info.num_inode_blocks * 16 ; i++){
+		getline(&line, &len, fp);
+		if(strcmp(line,"\n") != 0){
+			const char s[2] = ",";
+			char * token;
+			token = strtok(line, s);
+			printf("%s\n", token);
+		}
+	}
 }
 
 int main(){
 	int mounted=0;
-	char fs_mounted_name[256];
 
 	printf("existing file systems:\n");
 	int found = search_filesystems();
@@ -158,22 +296,41 @@ int main(){
 		char command[256];
 		scanf("%s",command);
 		if(strcmp(command, "create_filesystem") == 0 ){
-			create_sfs();
+			printf("Enter name of filesystem\n");
+			char name[20];
+			scanf("%s", name);
+			
+			create_sfs(name, 0);
 		}
 		if(strncmp(command, "mount", 5) == 0){
 			if(mounted){
 				char garbage[50];
 				scanf("%s",garbage);
-				printf("Filesystem %s already mounted\n", fs_mounted_name);
+				printf("Filesystem %s already mounted\n", mounted_fs_info.fs_mounted_name);
 			}
 			else{
-				fs_mounted_name[0] = '\0';
-				scanf("%s",fs_mounted_name);
+				mounted_fs_info.fs_mounted_name[0] = '\0';
+				scanf("%s",mounted_fs_info.fs_mounted_name);
 				char filename[200]="filesystem_";
-				strcat(filename, fs_mounted_name);
+				strcat(filename, mounted_fs_info.fs_mounted_name);
 				if (check_fs_validaity(filename)){
+					FILE * fp;
+					fp = fopen(filename, "r");
+					char * line = NULL;
+					size_t len = 0;
+					ssize_t read;
+					getline(&line, &len, fp);
+					const char s[2] = ",";
+					char * token;
+					token = strtok(line, s);
+					mounted_fs_info.fsid = atoi(token);
+					token = strtok(NULL, s);
+					token = strtok(NULL, s);
+					mounted_fs_info.num_inode_blocks = atoi(token);
+					token = strtok(NULL, s);
+					mounted_fs_info.num_data_blocks = atoi(token);
 					mounted = 1;
-					printf("%s mounted successfully!\n", fs_mounted_name);	
+					printf("%s(id : %d) mounted successfully!\n", mounted_fs_info.fs_mounted_name, mounted_fs_info.fsid);	
 				}
 				else
 					printf("Filesystem does not exist!\n");
@@ -182,6 +339,26 @@ int main(){
 		if(strcmp(command,"write_file") == 0){
 			if(mounted){
 				//implement write
+				char file_name[20];
+				char block_data[2048]="";
+				printf("Enter filename : ");
+				scanf("%s", file_name);
+				printf("Number of lines in the file : ");
+				int num_lines;
+				scanf("%d", &num_lines);
+				printf("Enter the lines below \n");
+				getchar();
+				while(num_lines -- ){
+					char temp[100];
+					temp[0]='\0';
+					gets(temp);
+					// printf("%s\n",temp);
+					strcat(block_data,temp);
+					if(num_lines)
+						strcat(block_data,";");
+				}
+				// printf("%s\n", block_data);
+				write_file(mounted_fs_info.fsid, file_name, block_data);
 			}
 			else{
 				printf("Mount a filesystem first!\n");
@@ -197,7 +374,7 @@ int main(){
 		}
 		if (strcmp(command,"list_files") == 0){
 			if(mounted){
-				//implement list_files
+				print_filelist(mounted_fs_info.fsid);
 			}
 			else{
 				printf("Mount a filesystem first!\n");
@@ -205,7 +382,7 @@ int main(){
 		}
 		if (strcmp(command,"data_bitmap") == 0){
 			if(mounted){
-				//implement data_bitmap
+				print_databitmaps(mounted_fs_info.fsid);
 			}
 			else{
 				printf("Mount a filesystem first!\n");
@@ -213,7 +390,7 @@ int main(){
 		}
 		if (strcmp(command,"inode_bitmap") == 0){
 			if(mounted){
-				//implement inode_bitmap
+				print_inodebitmaps(mounted_fs_info.fsid);
 			}
 			else{
 				printf("Mount a filesystem first!\n");
