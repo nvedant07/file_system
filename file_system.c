@@ -10,7 +10,7 @@ struct info{
 	int num_data_blocks;
 } mounted_fs_info;
 
-int i;
+int i,j;
 
 int search_filesystems(){
 	DIR *dir;
@@ -64,6 +64,31 @@ int get_fsid(){
 		closedir (dir);
 	}
 	return count + 1;	
+}
+
+int check_file_existence(char * filename){
+	char fs_filename[50]="filesystem_";
+	strcat(fs_filename, mounted_fs_info.fs_mounted_name);
+	//read inode bitmap
+	FILE * fp;
+	fp = fopen(fs_filename, "r");
+	char * line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	getline(&line, &len, fp);
+	for(i=0 ; i < mounted_fs_info.num_inode_blocks * 16 ; i++){
+		getline(&line, &len, fp);
+		if(strcmp(line,"\n") != 0){
+			const char s[2] = ",";
+			char * token;
+			token = strtok(line, s);
+			if(strcmp(token,filename) == 0)
+				return 1;
+		}
+	}
+	return 0;
 }
 
 int create_sfs(char * name, int nbytes){
@@ -122,7 +147,15 @@ int create_sfs(char * name, int nbytes){
 }
 
 int read_data(int disk, int blocknum, void * block){
-
+	char * block_ptr=(char *)block;
+	char * token_2;
+	const char delim[2] = ";";
+	block_ptr[strlen(block_ptr) - 1]='\0';
+	token_2 = strtok(block_ptr, delim);
+	while(token_2 != NULL){
+		printf("%s\n", token_2);
+		token_2=strtok(NULL, delim);
+	}
 }
 
 int write_data(int disk, int blocknum, void * block){
@@ -229,20 +262,16 @@ int read_file(int disk, char* filename, void* block){
 		token = strtok(lines_of_file[i], s);
 		if(strcmp(token, filename)==0){
 			token = strtok(NULL, s);
+			int size=0,block_arr[100];
 			while(token != NULL){
-				int blocknum = atoi(token);
+				block_arr[size]=atoi(token);
+				size++;
+				token = strtok(NULL, s); 
+			}
+			for(j=0;j<size;j++){
+				int blocknum = block_arr[j];
 				blocknum = 3 + mounted_fs_info.num_inode_blocks*16 + blocknum;
-				char * token_2;
-				const char delim[2] = ";";
-				// char final_str[4096]="";
-				lines_of_file[blocknum - 1][strlen(lines_of_file[blocknum - 1]) - 1]='\0';
-				token = strtok(lines_of_file[blocknum - 1], delim);
-				while(token != NULL){
-					printf("%s\n", token);
-					token=strtok(NULL,delim);
-				}
-				// printf("%s", lines_of_file[blocknum - 1]);
-				token = strtok(NULL, s);  
+				read_data(block_arr[j], blocknum, lines_of_file[blocknum - 1]);
 			}
 			return 1;
 		}
@@ -382,22 +411,27 @@ int main(){
 				char block_data[4096]="";
 				printf("Enter filename : ");
 				scanf("%s", file_name);
-				printf("Number of lines in the file : ");
-				int num_lines;
-				scanf("%d", &num_lines);
-				printf("Enter the lines below \n");
-				getchar();
-				while(num_lines -- ){
-					char temp[100];
-					temp[0]='\0';
-					gets(temp);
-					// printf("%s\n",temp);
-					strcat(block_data,temp);
-					if(num_lines)
-						strcat(block_data,";");
+				if(check_file_existence(file_name)){
+					printf("File already exists!\n");
 				}
-				// printf("%s\n", block_data);
-				write_file(mounted_fs_info.fsid, file_name, block_data);
+				else{
+					printf("Number of lines in the file : ");
+					int num_lines;
+					scanf("%d", &num_lines);
+					printf("Enter the lines below \n");
+					getchar();
+					while(num_lines -- ){
+						char temp[100];
+						temp[0]='\0';
+						gets(temp);
+						// printf("%s\n",temp);
+						strcat(block_data,temp);
+						if(num_lines)
+							strcat(block_data,";");
+					}
+					// printf("%s\n", block_data);
+					write_file(mounted_fs_info.fsid, file_name, block_data);
+				}
 			}
 			else{
 				printf("Mount a filesystem first!\n");
